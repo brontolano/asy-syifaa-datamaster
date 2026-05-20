@@ -1,0 +1,106 @@
+{
+  "name": "ASF PPDB WA Notify (Webhook Inbound)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ppdb-wa",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-ppdb",
+      "name": "PPDB Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ],
+      "webhookId": "asf-ppdb-wa"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nfunction trim(v) {\n  return String(v ?? '').trim();\n}\n\nfunction normalizePhone(v) {\n  const raw = trim(v).replace(/[^\\d+]/g, '');\n  if (!raw) return '';\n  const canonical = raw.startsWith('+62') ? `62${raw.slice(3)}` : raw;\n  return canonical.startsWith('0') ? `62${canonical.slice(1)}` : canonical;\n}\n\nreturn items.map((item) => {\n  const payload = item.json || {};\n  const to = normalizePhone(payload.to);\n  const message = trim(payload.message);\n  const eticket = trim(payload.eticket_no);\n  const studentName = trim(payload.student_name);\n\n  if (!to) {\n    throw new Error('Payload invalid: field \"to\" wajib diisi.');\n  }\n  if (!message) {\n    throw new Error('Payload invalid: field \"message\" wajib diisi.');\n  }\n\n  return {\n    json: {\n      to,\n      message,\n      eticket_no: eticket || null,\n      student_name: studentName || null,\n      source: trim(payload.source) || 'ppdb_register',\n      received_at: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "id": "node-validate-payload",
+      "name": "Validate Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst provider = String($env.N8N_WA_PROVIDER || 'waha').trim().toLowerCase();\nconst token = String($env.N8N_WA_TOKEN || '').trim();\nconst genericEndpoint = String($env.N8N_WA_ENDPOINT || '').trim();\nconst session = String($env.N8N_WA_SESSION || 'default').trim() || 'default';\n\nfunction providerEndpoint(name) {\n  if (name === 'fonnte') return genericEndpoint || 'https://api.fonnte.com/send';\n  if (name === 'wablas') return genericEndpoint;\n  if (name === 'waha') return genericEndpoint || 'https://waha.devlike.pro/api/sendText';\n  return genericEndpoint;\n}\n\nfunction asChatId(phone) {\n  return String(phone || '').includes('@') ? String(phone || '') : `${phone}@c.us`;\n}\n\nasync function sendOne(item) {\n  const endpoint = providerEndpoint(provider);\n  if (!endpoint) {\n    return {\n      ...item,\n      sent: false,\n      reason: 'missing_endpoint',\n      provider\n    };\n  }\n\n  if ((provider === 'fonnte' || provider === 'wablas') && !token) {\n    return {\n      ...item,\n      sent: false,\n      reason: 'missing_token',\n      provider\n    };\n  }\n\n  let request;\n  if (provider === 'fonnte') {\n    const form = new URLSearchParams({ target: item.to, message: item.message }).toString();\n    request = {\n      method: 'POST',\n      headers: {\n        'Content-Type': 'application/x-www-form-urlencoded',\n        'Authorization': token\n      },\n      body: form\n    };\n  } else if (provider === 'wablas') {\n    request = {\n      method: 'POST',\n      headers: {\n        'Content-Type': 'application/json',\n        'Authorization': token\n      },\n      body: JSON.stringify({ phone: item.to, message: item.message })\n    };\n  } else if (provider === 'waha') {\n    request = {\n      method: 'POST',\n      headers: {\n        'Content-Type': 'application/json',\n        ...(token ? { 'X-Api-Key': token } : {})\n      },\n      body: JSON.stringify({\n        session,\n        chatId: asChatId(item.to),\n        text: item.message\n      })\n    };\n  } else {\n    request = {\n      method: 'POST',\n      headers: {\n        'Content-Type': 'application/json',\n        ...(token ? { Authorization: `Bearer ${token}` } : {})\n      },\n      body: JSON.stringify({\n        to: item.to,\n        message: item.message,\n        eticket_no: item.eticket_no,\n        student_name: item.student_name,\n        source: item.source\n      })\n    };\n  }\n\n  try {\n    const response = await fetch(endpoint, request);\n    const text = await response.text().catch(() => '');\n    return {\n      ...item,\n      sent: response.ok,\n      provider,\n      reason: response.ok ? 'sent' : `http_${response.status}`,\n      gateway_status: response.status,\n      gateway_response: text ? text.slice(0, 500) : null\n    };\n  } catch (error) {\n    return {\n      ...item,\n      sent: false,\n      provider,\n      reason: 'network_error',\n      gateway_status: 0,\n      gateway_response: String(error?.message || error || 'unknown_error').slice(0, 500)\n    };\n  }\n}\n\nconst out = [];\nfor (const entry of items) {\n  const result = await sendOne(entry.json || {});\n  out.push({ json: result });\n}\nreturn out;"
+      },
+      "id": "node-send-wa",
+      "name": "Send WA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, provider: $json.provider, sent: $json.sent, reason: $json.reason, eticket_no: $json.eticket_no, student_name: $json.student_name, to: $json.to } }}",
+        "options": {}
+      },
+      "id": "node-respond-webhook",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        1090,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "PPDB Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Payload": {
+      "main": [
+        [
+          {
+            "node": "Send WA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WA": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

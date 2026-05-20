@@ -1,0 +1,24 @@
+{
+  "name": "asy-syifaa-backend",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "start:prod": "node src/server.js",
+    "lint": "node --check src/server.js",
+    "test": "node --test",
+    "release:check": "npm run lint && npm run test && npm run infra:check",
+    "infra:prepare": "node scripts/prepare-infra.mjs",
+    "infra:check": "node scripts/check-infra.mjs",
+    "backup:db": "node scripts/backup-db.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^2.0.0",
+    "pg": "^8.12.0"
+  }
+}

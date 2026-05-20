@@ -1,0 +1,47 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  password  String
+  role      String
+  santri    Santri?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Kamar {
+  id         String   @id @default(uuid()) @db.Uuid
+  kodeKamar  String   @unique
+  namaKamar  String
+  kapasitas  Int      @default(0)
+  santriList Santri[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Santri {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @unique @db.Uuid
+  user         User     @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  nis          String   @unique
+  namaLengkap  String
+  kamarId      String?  @db.Uuid
+  kamar        Kamar?   @relation(fields: [kamarId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  tanggalLahir DateTime
+  alamat       String
+  statusAktif  Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([namaLengkap])
+  @@index([statusAktif])
+  @@index([kamarId])
+}

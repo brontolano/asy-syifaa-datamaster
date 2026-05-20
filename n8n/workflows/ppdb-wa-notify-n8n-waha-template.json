@@ -1,0 +1,106 @@
+{
+  "name": "ASF PPDB WA Notify (WAHA)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ppdb-wa",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-ppdb-waha",
+      "name": "PPDB Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "asf-ppdb-wa-waha"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nfunction trim(v) {\n  return String(v ?? '').trim();\n}\n\nfunction normalizePhone(v) {\n  const raw = trim(v).replace(/[^\\d+]/g, '');\n  if (!raw) return '';\n  const canonical = raw.startsWith('+62') ? `62${raw.slice(3)}` : raw;\n  return canonical.startsWith('0') ? `62${canonical.slice(1)}` : canonical;\n}\n\nreturn items.map((item) => {\n  const payload = item.json || {};\n  const to = normalizePhone(payload.to);\n  const message = trim(payload.message);\n\n  if (!to) throw new Error('Payload invalid: field \"to\" wajib diisi.');\n  if (!message) throw new Error('Payload invalid: field \"message\" wajib diisi.');\n\n  return {\n    json: {\n      to,\n      chatId: `${to}@c.us`,\n      message,\n      eticket_no: trim(payload.eticket_no) || null,\n      student_name: trim(payload.student_name) || null,\n      source: trim(payload.source) || 'ppdb_register',\n      received_at: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "id": "node-validate-payload-waha",
+      "name": "Validate Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst endpointBase = String($env.N8N_WAHA_BASE_URL || 'https://waha.devlike.pro').trim().replace(/\\/+$/, '');\nconst endpoint = `${endpointBase}/api/sendText`;\nconst token = String($env.N8N_WAHA_API_KEY || '').trim();\nconst session = String($env.N8N_WAHA_SESSION || 'default').trim() || 'default';\n\nconst out = [];\nfor (const { json } of items) {\n  try {\n    const response = await fetch(endpoint, {\n      method: 'POST',\n      headers: {\n        'Content-Type': 'application/json',\n        ...(token ? { 'X-Api-Key': token } : {})\n      },\n      body: JSON.stringify({\n        session,\n        chatId: json.chatId,\n        text: json.message\n      })\n    });\n\n    const text = await response.text().catch(() => '');\n    out.push({\n      json: {\n        ...json,\n        sent: response.ok,\n        provider: 'waha',\n        reason: response.ok ? 'sent' : `http_${response.status}`,\n        gateway_status: response.status,\n        gateway_response: text ? text.slice(0, 500) : null\n      }\n    });\n  } catch (error) {\n    out.push({\n      json: {\n        ...json,\n        sent: false,\n        provider: 'waha',\n        reason: 'network_error',\n        gateway_status: 0,\n        gateway_response: String(error?.message || error || 'unknown_error').slice(0, 500)\n      }\n    });\n  }\n}\n\nreturn out;"
+      },
+      "id": "node-send-waha",
+      "name": "Send WAHA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        770,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, provider: $json.provider, sent: $json.sent, reason: $json.reason, eticket_no: $json.eticket_no, student_name: $json.student_name, to: $json.to, chatId: $json.chatId } }}",
+        "options": {}
+      },
+      "id": "node-respond-waha",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        1030,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "PPDB Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Payload": {
+      "main": [
+        [
+          {
+            "node": "Send WAHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WAHA": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
